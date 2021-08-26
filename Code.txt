@@ -1,0 +1,178 @@
+# import statements
+from pyspark.sql.functions import lower, col, lit, month
+
+
+
+# Question: 1
+crimeDataNewYorkDF = spark.read.parquet("/mnt/training/crime-data-2016/Crime-Data-New-York-2016.parquet")
+crimeDataLosAngelesDF = spark.read.parquet("dbfs:/mnt/training/crime-data-2016/Crime-Data-Los-Angeles-2016.parquet")
+crimeDataChicagoDF = spark.read.parquet("dbfs:/mnt/training/crime-data-2016/Crime-Data-Chicago-2016.parquet")
+crimeDataPhiladelphiaDF = spark.read.parquet("dbfs:/mnt/training/crime-data-2016/Crime-Data-Philadelphia-2016.parquet")
+crimeDataDallasDF = spark.read.parquet("dbfs:/mnt/training/crime-data-2016/Crime-Data-Dallas-2016.parquet")
+crimeDataBostonDF = spark.read.parquet("dbfs:/mnt/training/crime-data-2016/Crime-Data-Boston-2016.parquet")
+print(f"NewYork: {crimeDataNewYorkDF.count()}")
+print(f"LosAngeles: {crimeDataLosAngelesDF.count()}")
+print(f"Chicago: {crimeDataChicagoDF.count()}")
+print(f"Philadelphia: {crimeDataPhiladelphiaDF.count()}")
+print(f"Dallas: {crimeDataDallasDF.count()}")
+print(f"Boston: {crimeDataBostonDF.count()}")
+print()
+
+
+
+# Question: 2
+# Count number of crimes for each city
+crimeDataNewYork = crimeDataNewYorkDF.groupBy(col('offenseDescription').alias('Crimes in NewYork')).count()
+crimeDataLosAngeles = crimeDataLosAngelesDF.groupBy(col('crimeCodeDescription').alias('Crimes in LosAngeles')).count()
+crimeDataChicago = crimeDataChicagoDF.groupBy(col('primaryType').alias('Crimes in Chicago')).count()
+crimeDataPhiladelphia = crimeDataPhiladelphiaDF.groupBy(col('text_general_code').alias('Crimes in Philadelphia')).count()
+crimeDataDallas = crimeDataDallasDF.groupBy(col('typeOfIncident').alias('Crimes in Dallas')).count()
+crimeDataBoston = crimeDataBostonDF.groupBy(col('OFFENSE_CODE_GROUP').alias('Crimes in Boston')).count()
+
+# Display result
+display(crimeDataNewYork.orderBy(col('count').desc()))
+display(crimeDataLosAngeles.orderBy(col('count').desc()))
+display(crimeDataChicago.orderBy(col('count').desc()))
+display(crimeDataPhiladelphia.orderBy(col('count').desc()))
+display(crimeDataDallas.orderBy(col('count').desc()))
+display(crimeDataBoston.orderBy(col('count').desc()))
+
+
+
+# Question: 3
+# Filter robbery crimes from each city
+robberyLosAngelesDF = crimeDataLosAngelesDF.where(lower(col("crimeCodeDescription")).like("robbery"))
+robberyPhiladelphiaDF = crimeDataPhiladelphiaDF.where(lower(col("ucr_general_description")).like("robbery"))
+robberyDallasDF = crimeDataDallasDF.where(lower(col("typeOfIncident")).like("robbery%"))
+
+# Display answers
+print(f"Total robbery count\nLosAngeles: {robberyLosAngelesDF.count()}")
+print(f"Philadelphia: {robberyPhiladelphiaDF.count()}")
+print(f"Dallas: {robberyDallasDF.count()}")
+
+
+
+# Question: 4
+# Create temporary view to run SQL
+robberyLosAngelesDF.createOrReplaceTempView("LosAngelesData")
+robberyPhiladelphiaDF.createOrReplaceTempView("PhiladelphiaData")
+robberyDallasDF.createOrReplaceTempView("DallasData")
+
+# Extract month and robberies for each city
+robberiesByMonthLosAngelesDF = spark.sql("SELECT substring(timeOccurred, 6, 2) AS month, count(crimeCodeDescription) AS robberies FROM LosAngelesData GROUP BY month ORDER BY robberies")
+robberiesByMonthPhiladelphiaDF = spark.sql("SELECT substring(dispatch_date_time, 6, 2) AS month, count(ucr_general_description) AS robberies FROM PhiladelphiaData GROUP BY month ORDER BY robberies")
+robberiesByMonthDallasDF = spark.sql("SELECT substring(startingDateTime, 6, 2) AS month, count(typeOfIncident) AS robberies FROM DallasData GROUP BY month ORDER BY robberies")
+
+# Display answer
+print(f"LosAngeles:\nHighest robbery count:")
+robberiesByMonthLosAngelesDF.limit(1).show()
+print(f"Lowest robbery count:")
+robberiesByMonthLosAngelesDF.orderBy(robberiesByMonthLosAngelesDF.robberies.desc()).limit(1).show()
+
+print(f"Philadelphia:\nHighest robbery count:")
+robberiesByMonthPhiladelphiaDF.limit(1).show()
+print(f"Lowest robbery count:")
+robberiesByMonthPhiladelphiaDF.orderBy(robberiesByMonthPhiladelphiaDF.robberies.desc()).limit(1).show()
+
+print(f"Dallas:\nHighest robbery count:")
+robberiesByMonthDallasDF.limit(1).show()
+print(f"Lowest robbery count:")
+robberiesByMonthDallasDF.orderBy(robberiesByMonthDallasDF.robberies.desc()).limit(1).show()
+
+
+
+# Question: 5
+# Add column for city
+robberiesByMonthLosAngelesDF = robberiesByMonthLosAngelesDF.select(lit("LosAngeles").alias("city"), col("month"),col("robberies"))
+robberiesByMonthPhiladelphiaDF = robberiesByMonthPhiladelphiaDF.select(lit("Philadelphia").alias("city"), col("month"),col("robberies"))
+robberiesByMonthDallasDF = robberiesByMonthDallasDF.select(lit("Dallas").alias("city"), col("month"),col("robberies"))
+
+# Combine robberies for all cities
+combinedRobberiesByMonthDF = robberiesByMonthLosAngelesDF.union(robberiesByMonthPhiladelphiaDF).union(robberiesByMonthDallasDF)
+
+# Sum robberies by month to get highest and lowest
+combinedRobberiesByMonthDF.createOrReplaceTempView("combinedData")
+df = spark.sql("SELECT month, SUM(robberies) AS robberies FROM combinedData GROUP BY month ORDER BY robberies")
+
+# Print answer
+print(f"Highest combined robberies:")
+df.orderBy(df.robberies.desc()).limit(1).show()
+print(f"Lowest combined robberies:")
+df.orderBy(df.robberies).limit(1).show()
+
+
+
+# Question: 6
+display(combinedRobberiesByMonthDF.orderBy('month', 'city'))
+
+
+
+# Question: 7
+# Get population of each city
+cityDataDF = spark.read.parquet("/mnt/training/City-Data.parquet")
+LosAngelesPopulation = cityDataDF.select(cityDataDF.estPopulation2016.alias('population')).where((col('city') == 'Los Angeles')).toPandas().to_numpy().item()
+PhiladelphiaPopulation = cityDataDF.select(cityDataDF.estPopulation2016.alias('population')).where((col('city') == 'Philadelphia')).toPandas().to_numpy().item()
+DallasPopulation = cityDataDF.select(cityDataDF.estPopulation2016.alias('population')).where((col('city') == 'Dallas')).toPandas().to_numpy().item()
+
+# Rename robberies to robberyRate
+robberiesByMonthLosAngelesDF = robberiesByMonthLosAngelesDF.select('month', robberiesByMonthLosAngelesDF.robberies.alias('robberyRate'), 'city')
+robberiesByMonthPhiladelphiaDF = robberiesByMonthPhiladelphiaDF.select('month', robberiesByMonthPhiladelphiaDF.robberies.alias('robberyRate'), 'city')
+robberiesByMonthDallasDF = robberiesByMonthDallasDF.select('month', robberiesByMonthDallasDF.robberies.alias('robberyRate'), 'city')
+
+# calculate robberyRate for each city and store results in robberyRatesByCityDF
+robberyRatesByCityDF = robberiesByMonthLosAngelesDF.withColumn('robberyRate', robberiesByMonthLosAngelesDF['robberyRate']/LosAngelesPopulation).union(robberiesByMonthPhiladelphiaDF.withColumn('robberyRate', robberiesByMonthPhiladelphiaDF['robberyRate']/PhiladelphiaPopulation)).union(robberiesByMonthDallasDF.withColumn('robberyRate', robberiesByMonthDallasDF['robberyRate']/DallasPopulation))
+
+#Plot the Graph for the "per capita robbery rates" per month for each of the three cities
+display(robberyRatesByCityDF.orderBy('month', 'city'))
+
+
+
+# Question: 8
+# Filter rows with 'homicide' as crime type
+homicideNewYorkDF = crimeDataNewYorkDF.where((lower(col("offenseDescription")).like("murder%")) | (lower(col("offenseDescription")).like("homicide%")))
+homicideBostonDF = crimeDataBostonDF.where(lower(col("OFFENSE_CODE_GROUP")).like("homicide"))
+
+# Create temp view to run SQL
+homicideNewYorkDF.createOrReplaceTempView("homicideNewYork")
+homicideBostonDF.createOrReplaceTempView("homicideBoston")
+
+# count homicides per month and sort them by homicide counts
+homicidesByMonthNewYorkDF = spark.sql("SELECT month(reportDate) AS month, count(offenseDescription) AS homicides FROM homicideNewYork GROUP BY month ORDER BY homicides")
+homicidesByMonthBostonDF = spark.sql("SELECT MONTH AS month, count(OFFENSE_CODE_GROUP) AS homicides FROM homicideBoston GROUP BY month ORDER BY homicides")
+
+# Add cityName in dataframes
+homicidesByMonthNewYorkDF = homicidesByMonthNewYorkDF.select(col("month"),col("homicides"),lit("NewYork").alias("city"))
+homicidesByMonthBostonDF = homicidesByMonthBostonDF.select(col("month"),col("homicides"),lit("Boston").alias("city"))
+
+# Combine df's and create temp view to run SQL
+combinedhomicidesByMonthDF = homicidesByMonthNewYorkDF.union(homicidesByMonthBostonDF)
+combinedhomicidesByMonthDF.createOrReplaceTempView("combinedData")
+
+# Calculate total homicides for each month
+df = spark.sql("SELECT month, SUM(homicides) AS homicides FROM combinedData GROUP BY month ORDER BY homicides")
+
+# Display answer
+print(f"Month with Highest combined homicides:")
+df.orderBy(df.homicides.desc()).limit(1).show()
+print(f"Month with Lowest combined homicides: ")
+df.orderBy(df.homicides).limit(1).show()
+
+# Plot
+display(combinedhomicidesByMonthDF.orderBy('month'))
+
+
+
+# Question: 9
+# Get population of each city
+NewYorkPopulation = cityDataDF.select(cityDataDF.estPopulation2016.alias('population')).where((col('city') == 'New York')).toPandas().to_numpy().item()
+BostonPopulation = cityDataDF.select(cityDataDF.estPopulation2016.alias('population')).where((col('city') == 'Boston')).toPandas().to_numpy().item()
+
+# Rename homicides to homicideRate
+homicidesByMonthNewYorkDF = homicidesByMonthNewYorkDF.select('month', homicidesByMonthNewYorkDF.homicides.alias('homicideRate'), 'city')
+homicidesByMonthBostonDF = homicidesByMonthBostonDF.select('month', homicidesByMonthBostonDF.homicides.alias('homicideRate'), 'city')
+
+# calculate homicideRate for each city and store results in robberyRatesByCityDF
+homicideRatesByCityDF = homicidesByMonthNewYorkDF.withColumn('homicideRate', homicidesByMonthNewYorkDF['homicideRate']/NewYorkPopulation).union(homicidesByMonthBostonDF.withColumn('homicideRate', homicidesByMonthBostonDF['homicideRate']/BostonPopulation))
+
+#Plot the Graph for the "per capita homicide rates" per month for each of the three cities
+display(homicideRatesByCityDF.orderBy("month"))
